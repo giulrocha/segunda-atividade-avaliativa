@@ -1,1 +1,48 @@
+name: Etapas do build do sistema
 
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+jobs:
+  build-and-deploy-ec2-instance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.CI_SECRET_USER }}
+          password: ${{ secrets.CI_SECRET_PASSWORD }}
+
+      - name: Build and Push image Backend
+        run: |
+          docker image build -t ghcr.io/${{ github.repository }} --build-arg image=ghcr.io/${{ github.repository }}:backend -f ./backend/Dockerfile ./backend
+          docker image push ghcr.io/${{ github.repository }}
+
+      - name: Build and Push image Frontend
+        run: |
+          docker image build -t ghcr.io/${{ github.repository }} --build-arg image=ghcr.io/${{ github.repository }}:client -f ./client/Dockerfile ./client
+          docker image push ghcr.io/${{ github.repository }}
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+      - name: Configure Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_CONTENT }}" > ~/.kube/config
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -k k8s/
+          kubectl -n app-demo rollout status deployments
+      
